@@ -1,9 +1,9 @@
 /**
  * App state shared by the globe and the panels.
- * Step 3 adds asOf / tolerance / mode / replay to this same store.
+ * Replay (step 7) will add playing/speed to this same store.
  */
 import { create } from 'zustand'
-import type { CurrencyCode, Snapshot, Tolerance } from '../types'
+import type { CurrencyCode, Snapshot, Tolerance, ViewMode } from '../types'
 import { HOME_CURRENCY, ZONES, type CurrencyZone } from '../data/currencies'
 
 export interface SelectedCountry {
@@ -21,6 +21,10 @@ interface AppState {
   /** The simulated "now" (the data is historical). Replay (step 7) moves this. */
   asOf: string
   tolerance: Tolerance
+  setTolerance: (tolerance: Tolerance) => void
+  /** Simple (everyday) or Pro (history + detail) view */
+  mode: ViewMode
+  setMode: (mode: ViewMode) => void
   /** Latest data for asOf, from src/data/api.ts. null while loading. */
   snapshot: Snapshot | null
   setSnapshot: (snapshot: Snapshot) => void
@@ -56,6 +60,9 @@ export const DEMO_AS_OF = '2026-07-02T18:40:00Z'
 export const useAppStore = create<AppState>()((set, get) => ({
   asOf: DEMO_AS_OF,
   tolerance: 'balanced',
+  setTolerance: (tolerance) => set({ tolerance }),
+  mode: 'simple',
+  setMode: (mode) => set({ mode }),
   snapshot: null,
   setSnapshot: (snapshot) => set({ snapshot }),
 

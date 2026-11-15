@@ -1,0 +1,453 @@
+/**
+ * Pro view: a slim panel on the right with the pair's recent history and more detail.
+ * - Now: rate, spread, likely move in the next 30 min (and in money), trading cost
+ * - Forecast vs what actually happened (past hours) + how often the forecast range was right
+ * - Spread over time, and the hours when this pair is usually busy
+ * Never shows or implies which way the rate will go. Labels sample data.
+ */
+import { useEffect, useMemo, useState } from 'react'
+import { Info } from 'lucide-react'
+import {
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceArea,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  type TooltipContentProps,
+} from 'recharts'
+import { getHistory, USING_SAMPLE_DATA } from '../../data/api'
+import { decimalsFor } from '../../data/mock'
+import { costBand, costRatioPct, LEVEL_INFO, levelFor } from '../../lib/storm'
+import {
+  bpToMoney,
+  forecastCheck,
+  formatMoney,
+  hhmm,
+  hourlyProfile,
+  routePairs,
+  slashPair,
+  worstLeg,
+} from '../../lib/pro'
+import { useAppStore } from '../../store/useAppStore'
+import type { PairHistory, PairSnapshot, PairStatus, Tolerance } from '../../types'
+
+const HISTORY_HOURS = 120 // 5 days: enough for the "usual busy hours" view
+const RANGES = [3, 12, 24] as const
+type RangeH = (typeof RANGES)[number]
+
+const TOLERANCES: { value: Tolerance; label: string }[] = [
+  { value: 'relaxed', label: 'Relaxed' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'cautious', label: 'Cautious' },
+]
+
+const STATUS_NOTE: Partial<Record<PairStatus, string>> = {
+  rollover: 'Daily rollover: quotes are paused for a few minutes. No forecast right now.',
+  stale: 'Data delayed: no fresh quotes in the last few minutes. No forecast right now.',
+  no_data: 'No data for this pair today.',
+  thin: 'Weekend / thin market: fewer quotes than usual, treat the forecast with care.',
+}
+
+/* ---------- small building blocks ---------- */
+
+function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (v: T) => void
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex rounded-full border border-panel-border p-0.5">
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-accent ${
+            value === o.value ? 'bg-white/12 text-ink' : 'text-ink-muted hover:text-ink'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="min-w-0 rounded-lg bg-white/[0.04] px-2.5 py-2">
+      <div className="text-ink-muted truncate text-[10px] uppercase tracking-wider">{label}</div>
+      <div className="num text-ink mt-0.5 truncate text-sm">{value}</div>
+      {sub && <div className="text-ink-muted mt-0.5 truncate text-[10px]">{sub}</div>}
+    </div>
+  )
+}
+
+function SectionTitle({ title, sub }: { title: string; sub?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <h3 className="font-display text-ink text-[13px] font-medium">{title}</h3>
+      {sub && <span className="text-ink-faint text-[10px]">{sub}</span>}
+    </div>
+  )
+}
+
+function LevelBadge({ pair, tolerance }: { pair: PairSnapshot; tolerance: Tolerance }) {
+  const level = levelFor(pair, tolerance)
+  if (level === 'nodata') return <span className="text-ink-muted text-xs">No forecast right now</span>
+  const info = LEVEL_INFO[level]
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className={`flex items-center gap-1.5 text-xs ${info.textClass}`}>
+        <info.Icon className="size-4" aria-hidden />
+        <span className="font-medium">{info.name}</span>
+        <span className="text-ink-muted">· {info.volatility}</span>
+      </span>
+      <span className="text-ink-muted text-[11px]">
+        Busier than <span className="num text-ink">{Math.round(pair.percentile * 100)}%</span> of this pair's usual 30-min windows
+      </span>
+    </span>
+  )
+}
+
+/* ---------- chart pieces ---------- */
+
+interface ChartRow {
+  ts: number
+  forecast: number | null
+  band: [number, number] | null
+  actual: number | null
+  spread: number | null
+}
+
+const axisTick = { fill: 'var(--color-ink-faint)', fontSize: 10 }
+
+function ChartTip({ active, payload }: TooltipContentProps) {
+  if (!active || !payload?.length) return null
+  const row = payload[0].payload as ChartRow
+  const fmt = (v: number | null, unit = ' bp') => (v == null ? '—' : `${v.toFixed(2)}${unit}`)
+  return (
+    <div className="globe-tip num">
+      <strong className="text-ink">{hhmm(new Date(row.ts).toISOString())} UTC</strong>
+      {'forecast' in row && row.forecast !== undefined && (
+        <>
+          <span>
+            Forecast {fmt(row.forecast)}
+            {row.band && ` (${row.band[0].toFixed(1)}–${row.band[1].toFixed(1)})`}
+          </span>
+          <span>Actual {row.actual == null ? 'not known yet' : fmt(row.actual)}</span>
+        </>
+      )}
+      <span>Spread {fmt(row.spread)}</span>
+    </div>
+  )
+}
+
+function LegendKey({ dashed, color, label }: { dashed?: boolean; color: string; label: string }) {
+  return (
+    <span className="text-ink-muted flex items-center gap-1.5 text-[10px]">
+      <svg width="18" height="6" aria-hidden>
+        <line x1="0" y1="3" x2="18" y2="3" stroke={color} strokeWidth="2" strokeDasharray={dashed ? '4 3' : undefined} />
+      </svg>
+      {label}
+    </span>
+  )
+}
+
+/* ---------- the panel ---------- */
+
+export default function ProPanel() {
+  const snapshot = useAppStore((s) => s.snapshot)
+  const asOf = useAppStore((s) => s.asOf)
+  const base = useAppStore((s) => s.base)
+  const quote = useAppStore((s) => s.quote)
+  const amount = useAppStore((s) => s.amount)
+  const tolerance = useAppStore((s) => s.tolerance)
+  const setTolerance = useAppStore((s) => s.setTolerance)
+
+  const legs = useMemo(() => routePairs(snapshot, base, quote), [snapshot, base, quote])
+  const [picked, setPicked] = useState<string | null>(null)
+  const pair = legs.find((p) => p.pair === picked) ?? worstLeg(legs, tolerance)
+  const [rangeH, setRangeH] = useState<RangeH>(12)
+
+  // Load 5 days of history for the selected pair
+  const [history, setHistory] = useState<PairHistory | null>(null)
+  useEffect(() => {
+    if (!pair) return
+    let cancelled = false
+    getHistory(pair.pair, asOf, HISTORY_HOURS)
+      .then((h) => !cancelled && setHistory(h))
+      .catch((err: unknown) => console.error('[data] could not load history', err))
+    return () => {
+      cancelled = true
+    }
+  }, [pair?.pair, asOf]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const nowMs = new Date(asOf).getTime()
+  const shown = useMemo(() => {
+    if (!history || history.pair !== pair?.pair) return []
+    const from = nowMs - rangeH * 3_600_000
+    return history.points.filter((p) => new Date(p.t).getTime() >= from)
+  }, [history, pair?.pair, rangeH, nowMs])
+
+  const rows: ChartRow[] = useMemo(
+    () =>
+      shown.map((p) => ({
+        ts: new Date(p.t).getTime(),
+        forecast: p.volForecast,
+        band: p.volForecastLow != null && p.volForecastHigh != null ? [p.volForecastLow, p.volForecastHigh] : null,
+        actual: p.volActual,
+        spread: p.spreadBps,
+      })),
+    [shown],
+  )
+  const check = useMemo(() => forecastCheck(shown), [shown])
+  const hours = useMemo(() => (history ? hourlyProfile(history.points, tolerance) : []), [history, tolerance])
+  const nowHour = new Date(asOf).getUTCHours()
+  // Stretch the shading across this pair's own quietest → busiest hour so the pattern is readable
+  const avgs = hours.map((h) => h.avg).filter((v): v is number => v != null)
+  const lo = Math.min(...avgs)
+  const span = Math.max(...avgs) - lo || 1
+
+  if (base === quote || !pair) {
+    return (
+      <aside aria-label="Pro view" className="glass w-[min(380px,calc(100vw-1.5rem))] p-4 text-sm">
+        <p className="text-ink-muted">Pick two different currencies to see their history.</p>
+      </aside>
+    )
+  }
+
+  const horizon = pair.forecast.horizonsMin.at(-1) ?? 30
+  const move = pair.forecast.vol.at(-1) ?? 0
+  const moveLow = pair.forecast.volLow?.at(-1)
+  const moveHigh = pair.forecast.volHigh?.at(-1)
+  const ratio = costRatioPct(pair)
+  const band = costBand(ratio)
+  const statusNote = STATUS_NOTE[pair.status]
+  const confident = pair.status === 'live' || pair.status === 'thin'
+
+  return (
+    <aside
+      aria-label="Pro view"
+      className="glass flex max-h-full w-[min(380px,calc(100vw-1.5rem))] flex-col gap-4 overflow-y-auto p-4"
+    >
+      {/* Header */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-display text-ink text-base font-semibold tracking-tight">
+            {base} → {quote}
+          </h2>
+          <Segmented label="Tolerance" options={TOLERANCES} value={tolerance} onChange={setTolerance} />
+        </div>
+
+        {legs.length > 1 && (
+          <div className="space-y-1">
+            <p className="text-ink-muted text-[11px]">
+              No direct {base}/{quote} data, so this goes through USD. The busier leg sets the level.
+            </p>
+            <div className="flex gap-1.5">
+              {legs.map((leg) => {
+                const lvl = levelFor(leg, tolerance)
+                const info = lvl === 'nodata' ? null : LEVEL_INFO[lvl]
+                return (
+                  <button
+                    key={leg.pair}
+                    type="button"
+                    onClick={() => setPicked(leg.pair)}
+                    aria-pressed={leg.pair === pair.pair}
+                    className={`flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                      leg.pair === pair.pair ? 'border-accent text-ink' : 'border-panel-border text-ink-muted hover:text-ink'
+                    }`}
+                  >
+                    {info && <info.Icon className={`size-3 ${info.textClass}`} aria-hidden />}
+                    {slashPair(leg.pair)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-start gap-2">
+          <span className="num text-ink-muted pt-px text-xs">{slashPair(pair.pair)}</span>
+          <LevelBadge pair={pair} tolerance={tolerance} />
+        </div>
+        {statusNote && <p className="rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-ink-muted">{statusNote}</p>}
+      </div>
+
+      {/* Now */}
+      <div className="grid grid-cols-3 gap-1.5">
+        <Stat label="Mid rate" value={pair.mid.toFixed(decimalsFor(pair.pair) + 1)} sub={`${slashPair(pair.pair)}`} />
+        <Stat label="Spread" value={`${pair.spreadBps.toFixed(2)} bp`} sub="bid–ask, now" />
+        <Stat
+          label={`${horizon}-min move`}
+          value={confident ? `±${move.toFixed(1)} bp` : '—'}
+          sub={confident ? `≈ ±${formatMoney(bpToMoney(amount, move), base)}` : 'no forecast'}
+        />
+      </div>
+      {confident && (
+        <p className="text-ink-muted -mt-2 text-[11px] leading-snug">
+          On your {formatMoney(amount, base)}, a typical move over the next {horizon} min is worth about ±
+          {formatMoney(bpToMoney(amount, move), base)}, either direction (likely range {moveLow?.toFixed(1)}–
+          {moveHigh?.toFixed(1)} bp).
+          {band && ratio != null && (
+            <>
+              {' '}
+              Spread ≈ {ratio.toFixed(0)}% of that move: <span className="text-ink">{band.label}</span>{' '}
+              <span className="text-ink-faint">(provisional bands)</span>.
+            </>
+          )}
+        </p>
+      )}
+
+      {/* Range filter */}
+      <div className="flex items-center justify-between">
+        <span className="text-ink-muted text-[10px] uppercase tracking-wider">History</span>
+        <Segmented
+          label="History range"
+          options={RANGES.map((h) => ({ value: h, label: `${h} h` }))}
+          value={rangeH}
+          onChange={setRangeH}
+        />
+      </div>
+
+      {/* Forecast vs actual */}
+      <section className="space-y-1.5" aria-label="Forecast versus actual volatility">
+        <SectionTitle title="Forecast vs what happened" sub={`bp moved over each ${horizon}-min window`} />
+        <div className="flex gap-3">
+          <LegendKey dashed color="var(--color-series-forecast)" label="Forecast (shaded: likely range)" />
+          <LegendKey color="var(--color-series-actual)" label="Actual" />
+        </div>
+        <div className="h-36">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 340, height: 144 }}>
+            <ComposedChart data={rows} margin={{ top: 6, right: 4, bottom: 0, left: -18 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-panel-border)" />
+              <XAxis
+                dataKey="ts"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
+                tickFormatter={(v: number) => hhmm(new Date(v).toISOString())}
+                tick={axisTick}
+                tickLine={false}
+                axisLine={false}
+                minTickGap={28}
+              />
+              <YAxis tick={axisTick} tickLine={false} axisLine={false} width={40} />
+              <ReferenceArea
+                x1={nowMs - horizon * 60_000}
+                x2={nowMs}
+                fill="var(--color-ink)"
+                fillOpacity={0.04}
+                ifOverflow="hidden"
+              />
+              <Area
+                dataKey="band"
+                stroke="none"
+                fill="var(--color-series-forecast)"
+                fillOpacity={0.16}
+                isAnimationActive={false}
+                activeDot={false}
+              />
+              <Line
+                dataKey="forecast"
+                stroke="var(--color-series-forecast)"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                dot={false}
+                isAnimationActive={false}
+              />
+              <Line dataKey="actual" stroke="var(--color-series-actual)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <ReferenceLine x={nowMs} stroke="var(--color-ink-muted)" strokeDasharray="2 3" />
+              <Tooltip content={ChartTip} cursor={{ stroke: 'var(--color-ink-faint)' }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        <p className="text-ink-muted text-[11px] leading-snug">
+          {check ? (
+            <>
+              Last {rangeH} h: the actual move landed inside the forecast range in{' '}
+              <span className="num text-ink">{Math.round(check.insideRange * 100)}%</span> of {check.windows} windows; typical
+              miss <span className="num text-ink">±{Math.round(check.typicalMissPct)}%</span>.
+            </>
+          ) : (
+            'Not enough finished windows in this range yet.'
+          )}{' '}
+          <span className="text-ink-faint">The last {horizon} min (shaded) have no actual yet.</span>
+        </p>
+      </section>
+
+      {/* Spread */}
+      <section className="space-y-1.5" aria-label="Spread over time">
+        <SectionTitle title="Spread" sub="bp, gaps = rollover / no data" />
+        <div className="h-20">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 340, height: 80 }}>
+            <ComposedChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: -18 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-panel-border)" />
+              <XAxis dataKey="ts" type="number" scale="time" domain={['dataMin', 'dataMax']} hide />
+              <YAxis tick={axisTick} tickLine={false} axisLine={false} width={40} tickCount={3} />
+              <Line dataKey="spread" stroke="var(--color-ink-muted)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <ReferenceLine x={nowMs} stroke="var(--color-ink-muted)" strokeDasharray="2 3" />
+              <Tooltip content={ChartTip} cursor={{ stroke: 'var(--color-ink-faint)' }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      {/* Usual busy hours */}
+      <section className="space-y-1.5" aria-label="Usual volatility by hour">
+        <SectionTitle title="When it's usually busy" sub="avg volatility by hour, UTC, last 5 days" />
+        <div className="grid grid-cols-24 gap-[2px]">
+          {hours.map((h) => {
+            const info = h.level ? LEVEL_INFO[h.level] : null
+            const label = h.avg == null ? 'no data' : `${Math.round(h.avg * 100)}th pct · ${info?.name}`
+            return (
+              <div
+                key={h.hour}
+                title={`${String(h.hour).padStart(2, '0')}:00–${String((h.hour + 1) % 24).padStart(2, '0')}:00 UTC · ${label}`}
+                aria-label={`${h.hour}:00 UTC, ${label}`}
+                className={`h-5 rounded-[3px] ${h.hour === nowHour ? 'ring-1 ring-ink' : ''}`}
+                style={{
+                  background:
+                    h.avg == null
+                      ? 'var(--color-nodata)'
+                      : `color-mix(in oklab, var(--color-series-forecast) ${Math.round(12 + ((h.avg - lo) / span) * 88)}%, transparent)`,
+                }}
+              />
+            )
+          })}
+        </div>
+        <div className="text-ink-faint flex justify-between text-[10px]">
+          <span>00</span>
+          <span>06</span>
+          <span>12</span>
+          <span>18</span>
+          <span>24</span>
+        </div>
+        <p className="text-ink-muted text-[11px]">Brighter = usually more volatile (vs this pair's quietest hour). Outlined = the current hour. Hover for details.</p>
+      </section>
+
+      {/* Honesty footer */}
+      <p className="text-ink-faint flex gap-1.5 border-t border-panel-border pt-3 text-[10px] leading-snug">
+        <Info className="mt-px size-3 shrink-0" aria-hidden />
+        <span>
+          We forecast how much a rate may move and what it costs to trade, never which way it will go.
+          {USING_SAMPLE_DATA && ' Sample data, not real prices.'}
+        </span>
+      </p>
+    </aside>
+  )
+}

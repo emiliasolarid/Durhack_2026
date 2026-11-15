@@ -1,5 +1,6 @@
 /**
  * Layout: the globe fills the screen; small panels sit at the edges so it stays visible.
+ * Pro mode adds a slim history panel on the right (the globe stays visible on the left/centre).
  * Steps 5–7 add the forecast panel, execution strip and replay controls.
  */
 import { useEffect } from 'react'
@@ -7,6 +8,7 @@ import FxGlobe from './components/globe/FxGlobe'
 import ConvertCard from './components/convert/ConvertCard'
 import RatesTicker from './components/layout/RatesTicker'
 import StormLegend from './components/layout/StormLegend'
+import ProPanel from './components/pro/ProPanel'
 import { getSnapshot } from './data/api'
 import { useAppStore } from './store/useAppStore'
 
@@ -30,6 +32,7 @@ function useSnapshotLoader() {
 
 export default function App() {
   useSnapshotLoader()
+  const mode = useAppStore((s) => s.mode)
 
   return (
     <div className="relative h-full w-full">
@@ -46,10 +49,17 @@ export default function App() {
         <ConvertCard />
       </div>
 
-      {/* Bottom-right: volatility key */}
-      <div className="absolute bottom-3 right-3 hidden sm:block">
-        <StormLegend />
-      </div>
+      {mode === 'pro' ? (
+        /* Right: Pro panel (history + detail), between the top bar and the bottom edge */
+        <div className="absolute top-15 right-3 bottom-3 flex flex-col">
+          <ProPanel />
+        </div>
+      ) : (
+        /* Bottom-right: volatility key */
+        <div className="absolute bottom-3 right-3 hidden sm:block">
+          <StormLegend />
+        </div>
+      )}
     </div>
   )
 }

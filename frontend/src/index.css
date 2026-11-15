@@ -26,6 +26,10 @@
   --color-storm: #f43f8e;      /* magenta + lightning */
   --color-nodata: #334155;
 
+  /* Pro charts: two data series (validated: CVD-safe on the dark panel). Forecast is also dashed. */
+  --color-series-forecast: #6b8cf5;
+  --color-series-actual: #c8783a;
+
   /* Type */
   --font-display: "Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;

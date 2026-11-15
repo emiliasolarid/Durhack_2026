@@ -6,6 +6,7 @@
  */
 import { useMemo } from 'react'
 import { USING_SAMPLE_DATA } from '../../data/api'
+import ModeToggle from './ModeToggle'
 import { decimalsFor } from '../../data/mock'
 import { LEVEL_INFO, levelFor, worseLevel } from '../../lib/storm'
 import { findPair } from '../../lib/zones'
@@ -98,6 +99,9 @@ export default function RatesTicker() {
           </span>
         )}
         Updated <span className="num text-ink">{formatUtc(snapshot?.lastUpdated)}</span>
+      </span>
+      <span className="shrink-0 border-l border-panel-border px-2">
+        <ModeToggle />
       </span>
     </div>
   )
