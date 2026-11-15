@@ -116,7 +116,11 @@ export default function FxGlobe() {
 
   const selectedCode = useAppStore((s) => s.selected?.code ?? null)
   const quote = useAppStore((s) => s.quote)
-  const base = useAppStore((s) => s.base)
+  // `base` = the currency the map is read from: the country you clicked (viewFrom), else your From.
+  // `yourBase` = your From currency (your route, clicks on lines).
+  const yourBase = useAppStore((s) => s.base)
+  const viewFrom = useAppStore((s) => s.viewFrom)
+  const base = viewFrom ?? yourBase
   const snapshot = useAppStore((s) => s.snapshot)
   const tolerance = useAppStore((s) => s.tolerance)
   const mapLayer = useAppStore((s) => s.mapLayer)
@@ -248,12 +252,12 @@ export default function FxGlobe() {
   const hoveredZone = hoveredCode ? (ZONE_BY_COUNTRY.get(hoveredCode)?.code ?? null) : null
   const arcFrom = useMemo(() => {
     const m = new Map<string, CurrencyCode>()
-    const add = (to: CurrencyCode | null) => {
+    const add = (from: CurrencyCode, to: CurrencyCode | null) => {
       if (!to) return
-      for (const leg of routeLegs(snapshot, base, to)) m.set(`${leg.pair.base}-${leg.pair.quote}`, leg.from)
+      for (const leg of routeLegs(snapshot, from, to)) m.set(`${leg.pair.base}-${leg.pair.quote}`, leg.from)
     }
-    add(quote)
-    add(hoveredZone)
+    add(yourBase, quote)
+    add(base, hoveredZone)
     if (alertArcId) m.set(alertArcId, alertArcId.split('-')[0])
     if (mapLayer === 'signal') {
       for (const p of snapshot?.pairs ?? []) {
@@ -262,7 +266,7 @@ export default function FxGlobe() {
       }
     }
     return m
-  }, [snapshot, base, quote, hoveredZone, mapLayer, alertArcId])
+  }, [snapshot, base, yourBase, quote, hoveredZone, mapLayer, alertArcId])
   const visibleKey = [...arcFrom.keys()].sort().join('|')
 
   // Same arc objects as above (so lines don't restart their animation), only the ones worth showing
@@ -273,8 +277,8 @@ export default function FxGlobe() {
 
   /** Arcs on your route (drawn bolder) */
   const routeArcIds = useMemo(
-    () => new Set(routeLegs(snapshot, base, quote).map((l) => `${l.pair.base}-${l.pair.quote}`)),
-    [snapshot, base, quote],
+    () => new Set(routeLegs(snapshot, yourBase, quote).map((l) => `${l.pair.base}-${l.pair.quote}`)),
+    [snapshot, yourBase, quote],
   )
 
   const getPairForArc = useCallback(
@@ -399,16 +403,16 @@ export default function FxGlobe() {
     (obj: object) => {
       const arc = obj as StableArc
       setQuote(
-        arc.base === base
+        arc.base === yourBase
           ? arc.quote
-          : arc.quote === base
+          : arc.quote === yourBase
             ? arc.base
             : arc.quote === 'USD'
               ? arc.base
               : arc.quote,
       )
     },
-    [setQuote, base],
+    [setQuote, yourBase],
   )
 
   // 2. Spin + pause-on-drag, set up once the globe exists

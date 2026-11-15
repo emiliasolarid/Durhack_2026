@@ -3,13 +3,15 @@
  * Pro mode adds a slim history panel on the right (the globe stays visible on the left/centre).
  * Bottom-centre: replay controls (play back through the last day of data).
  */
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import FxGlobe from './components/globe/FxGlobe'
 import ConvertCard from './components/convert/ConvertCard'
 import RatesTicker from './components/layout/RatesTicker'
 import StormLegend from './components/layout/StormLegend'
 import ProPanel from './components/pro/ProPanel'
 import ExtremeAlert from './components/layout/ExtremeAlert'
+import ViewFromChip from './components/layout/ViewFromChip'
+import MarketStatusChip from './components/layout/MarketStatusChip'
 import ReplayBar from './components/layout/ReplayBar'
 import { getSnapshot } from './data/api'
 import { useAppStore } from './store/useAppStore'
@@ -57,8 +59,20 @@ function useReplayClock() {
   }, [playing])
 }
 
+/** First view: once the first data arrives, fly the camera to your From → To route (once per visit) */
+function useIntroFlight() {
+  const hasData = useAppStore((s) => s.snapshot != null)
+  const done = useRef(false)
+  useEffect(() => {
+    if (!hasData || done.current) return
+    done.current = true
+    useAppStore.getState().focusRoute()
+  }, [hasData])
+}
+
 export default function App() {
   useSnapshotLoader()
+  useIntroFlight()
   useLiveClock()
   useReplayClock()
   const mode = useAppStore((s) => s.mode)
@@ -72,6 +86,12 @@ export default function App() {
       <header className="absolute top-3 left-3 right-3">
         <RatesTicker />
       </header>
+
+      {/* Top-centre: market closed / data delayed, and which currency the map is read from (after a country click) */}
+      <div className="pointer-events-none absolute top-17 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 [&>*]:pointer-events-auto">
+        <MarketStatusChip />
+        <ViewFromChip />
+      </div>
 
       {/* Left column: Extreme alerts (top, shrinks / scrolls to fit) above the convert card (bottom) */}
       <div className="pointer-events-none absolute top-17 bottom-3 left-3 flex flex-col justify-end gap-3 [&>*]:pointer-events-auto">

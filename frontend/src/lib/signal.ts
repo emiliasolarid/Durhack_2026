@@ -97,3 +97,21 @@ export function signalFromMeaning(v: SignalFromView): string {
 export function signalFromDetail(v: SignalFromView): string {
   return `expected ${signed(v.moveBps)} bp vs ${v.hurdleBps.toFixed(1)} bp cost, next ${v.horizonMin} min`
 }
+
+/**
+ * The currency to read a pair's signal from, so every place in the UI says the same thing:
+ * - your From currency if it's in the pair (USD/JPY seen from USD → "Sell JPY", same as the globe);
+ * - else USD if it's in the pair (routes go through USD, so it matches the globe's second leg);
+ * - else the pair's second currency (EUR/JPY → "Buy EUR" = the team's "BUY EUR/JPY").
+ */
+export function heldCurrency(pair: PairSnapshot, from: CurrencyCode): CurrencyCode {
+  if (pair.base === from || pair.quote === from) return from
+  if (pair.base === 'USD' || pair.quote === 'USD') return 'USD'
+  return pair.quote
+}
+
+/** Short pair-level wording for traders: "BUY USD/JPY" (same model call, said the market way) */
+export function pairCall(pair: PairSnapshot): string | null {
+  const action = actionFor(pair)
+  return action ? `${action.toUpperCase()} ${pair.base}/${pair.quote}` : null
+}

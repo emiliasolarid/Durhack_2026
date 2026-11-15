@@ -85,6 +85,15 @@ interface AppState {
   /** Pair picked in the Extreme alert list (e.g. "SGDJPY"): drawn bright red on the globe until cleared */
   alertPair: string | null
   /**
+   * The currency the map is read from after you click its country (colours, keys, ticker):
+   * click Japan → every country is coloured vs JPY. null = your "From" currency. Your From/To and the
+   * converted amount don't change. Cleared by "Back to …", Esc, empty globe, or changing From/To.
+   */
+  viewFrom: CurrencyCode | null
+  setViewFrom: (code: CurrencyCode | null) => void
+  /** Point the camera halfway along your From → To route (first load), so you see your route, not the Atlantic */
+  focusRoute: () => void
+  /**
    * Show a pair from the Extreme alert list: highlight it and fly the camera to it.
    * If the pair includes your From currency, its other currency also becomes "To" (your route).
    * Picking the highlighted pair again clears it.
@@ -173,9 +182,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setAmount: (amount) => set({ amount }),
 
   alertPair: null,
+  viewFrom: null,
+  setViewFrom: (code) => set({ viewFrom: code && code !== get().base ? code : null }),
+  focusRoute: () => {
+    const { base, quote } = get()
+    const a = zoneOf(base)?.anchor
+    const b = zoneOf(quote)?.anchor
+    if (!a || !b) return
+    set({ selected: null, focus: { lat: (a.lat + b.lat) / 2, lng: midLng(a.lng, b.lng) } })
+  },
 
   setBase: (code) => {
-    set({ alertPair: null })
+    set({ alertPair: null, viewFrom: null })
     const { quote, base } = get()
     // Picking the "To" currency as "From" swaps them, so the camera follows the new "To" (old From)
     if (code === quote) set({ base: code, quote: base, ...focusZone(base) })
@@ -183,7 +201,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   setQuote: (code) => {
-    set({ alertPair: null })
+    set({ alertPair: null, viewFrom: null })
     const { base, quote } = get()
     if (code === base) set({ quote: code, base: quote, ...focusZone(code) })
     else set({ quote: code, ...focusZone(code) })
@@ -191,18 +209,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   swap: () => {
     const { base, quote } = get()
-    set({ base: quote, quote: base, alertPair: null, ...focusZone(base) })
+    set({ base: quote, quote: base, alertPair: null, viewFrom: null, ...focusZone(base) })
   },
 
   selectCountry: (country, focus) => {
     const { base } = get()
     const zoneCode = country.zone?.code
-    // Clicking a lit zone that isn't the "From" currency makes it the "To" currency
-    if (zoneCode && zoneCode !== base) set({ quote: zoneCode, selected: country, focus, alertPair: null })
-    else set({ selected: country, focus, alertPair: null })
+    // Clicking a lit zone that isn't the "From" currency makes it the "To" currency AND the currency the
+    // map is read from (every other country recoloured vs it); clicking your own From country resets that
+    if (zoneCode && zoneCode !== base) set({ quote: zoneCode, viewFrom: zoneCode, selected: country, focus, alertPair: null })
+    else set({ selected: country, focus, alertPair: null, viewFrom: null })
   },
 
-  clearSelection: () => set({ selected: null, focus: null, alertPair: null }),
+  clearSelection: () => set({ selected: null, focus: null, alertPair: null, viewFrom: null }),
 
   showAlertPair: (p) => {
     const { base, alertPair, setQuote, clearSelection } = get()

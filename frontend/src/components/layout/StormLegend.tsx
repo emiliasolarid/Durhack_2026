@@ -54,6 +54,18 @@ function LevelWord({ level }: { level: ZoneLevel }) {
   )
 }
 
+/** The periwinkle row: your own currency, or the country you clicked (map read from its currency) */
+function ReferenceRow() {
+  const viewFrom = useAppStore((s) => s.viewFrom)
+  return (
+    <li className="text-ink-muted flex items-center gap-2">
+      <span className="mx-0.5 size-3 shrink-0 rounded-sm bg-accent" aria-hidden />
+      <span className="w-16 shrink-0">{viewFrom ? 'Seen from' : 'From'}</span>
+      <span>{viewFrom ? `${viewFrom}, the country you clicked` : 'Your own currency'}</span>
+    </li>
+  )
+}
+
 /** Card shell shared by both keys: same look as the Extreme alert card (icon + uppercase title + one line) */
 function KeyCard({ label, Icon, title, subtitle, children }: { label: string; Icon: LucideIcon; title: string; subtitle: ReactNode; children: ReactNode }) {
   return (
@@ -74,7 +86,7 @@ function KeyCard({ label, Icon, title, subtitle, children }: { label: string; Ic
 
 /** Key for the Buy / Sell map layer: every colour is read from your "From" currency */
 function SignalLegend() {
-  const base = useAppStore((s) => s.base)
+  const base = useAppStore((s) => s.viewFrom ?? s.base)
   const hasSignal = useAppStore((s) => s.snapshot?.pairs.some((p) => p.signal) ?? false)
   const rows: { action: 'buy' | 'sell' | 'hold'; meaning: string }[] = [
     { action: 'buy', meaning: `Expected to rise vs ${base}` },
@@ -88,7 +100,7 @@ function SignalLegend() {
       title="Buy / Sell signal"
       subtitle={
         <>
-          Model signal for the next 10 min, seen from your <span className="num text-ink">{base}</span>
+          Model signal for the next 10 min, seen from <span className="num text-ink">{base}</span>
         </>
       }
     >
@@ -103,11 +115,7 @@ function SignalLegend() {
             </li>
           )
         })}
-        <li className="text-ink-muted flex items-center gap-2">
-          <span className="mx-0.5 size-3 shrink-0 rounded-sm bg-accent" aria-hidden />
-          <span className="w-16 shrink-0">From</span>
-          <span>Your own currency</span>
-        </li>
+        <ReferenceRow />
         <li className="text-ink-muted flex items-center gap-2">
           <span className="mx-0.5 size-3 shrink-0 rounded-sm bg-nodata" aria-hidden />
           <span className="w-16 shrink-0">No signal</span>
@@ -136,7 +144,7 @@ export default function StormLegend() {
 function VolatilityLegend() {
   const tolerance = useAppStore((s) => s.tolerance)
   const snapshot = useAppStore((s) => s.snapshot)
-  const base = useAppStore((s) => s.base)
+  const base = useAppStore((s) => s.viewFrom ?? s.base)
   const [changes, setChanges] = useState<ZoneChange[] | null>(null)
 
   // The "what changed" note fades away after a few seconds
@@ -187,11 +195,7 @@ function VolatilityLegend() {
             </span>
           </li>
         ))}
-        <li className="text-ink-muted flex items-center gap-2">
-          <span className="mx-0.5 size-3 shrink-0 rounded-sm bg-accent" aria-hidden />
-          <span className="w-16 shrink-0">From</span>
-          <span>Your own currency</span>
-        </li>
+        <ReferenceRow />
         <li className="text-ink-muted flex items-center gap-2">
           <span className="mx-0.5 size-3 shrink-0 rounded-sm bg-nodata" aria-hidden />
           <span className="w-16 shrink-0">No data</span>

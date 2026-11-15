@@ -22,7 +22,16 @@ import {
 } from 'recharts'
 import { getHistory, USING_SAMPLE_DATA } from '../../data/api'
 import { decimalsFor } from '../../data/mock'
-import { actionFor, SIGNAL_DISCLAIMER, SIGNAL_INFO, signalDetail, signalHeadline } from '../../lib/signal'
+import {
+  heldCurrency,
+  pairCall,
+  SIGNAL_DISCLAIMER,
+  SIGNAL_INFO,
+  signalFrom,
+  signalFromDetail,
+  signalFromMeaning,
+  signalFromTitle,
+} from '../../lib/signal'
 import { costBand, costRatioPct, EXTREME_RATIO, LEVEL_INFO, levelFor, volRatio } from '../../lib/storm'
 import {
   bpToMoney,
@@ -332,7 +341,8 @@ export default function ProPanel() {
   const levelColor = level === 'nodata' ? 'var(--color-nodata)' : `var(${LEVEL_INFO[level].colorVar})`
   const band = costBand(ratio)
   const statusNote = STATUS_NOTE[pair.status]
-  const signalAction = actionFor(pair)
+  // Same wording as the globe and ticker: read from the currency you hold on this leg
+  const signalView = signalFrom(pair, heldCurrency(pair, base))
   const confident = pair.status === 'live' || pair.status === 'thin'
 
   return (
@@ -379,10 +389,14 @@ export default function ProPanel() {
         )}
 
         <LevelBadge pair={pair} tolerance={tolerance} />
-        {signalAction && (
+        {signalView && (
           <p className="text-ink-muted text-[11px] leading-snug">
-            Model signal: <span className={`font-semibold ${SIGNAL_INFO[signalAction].textClass}`}>{signalHeadline(pair)}</span>
-            <span className="num"> · {signalDetail(pair)}</span>
+            Model signal:{' '}
+            <span className={`font-semibold ${SIGNAL_INFO[signalView.action].textClass}`}>{signalFromTitle(signalView)}</span>
+            <span> · {signalFromMeaning(signalView)}</span>
+            <span className="num block">
+              {signalFromDetail(signalView)} · = {pairCall(pair)}
+            </span>
             <span className="text-ink-faint block text-[10px]">{SIGNAL_DISCLAIMER}.</span>
           </p>
         )}
