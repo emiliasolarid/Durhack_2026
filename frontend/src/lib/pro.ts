@@ -27,6 +27,45 @@ export function worstLeg(pairs: PairSnapshot[], tolerance: Tolerance): PairSnaps
 /** "USDJPY" → "USD/JPY" */
 export const slashPair = (pair: string) => `${pair.slice(0, 3)}/${pair.slice(3)}`
 
+/* ---------------- Tolerance: what the user plans for ---------------- */
+
+export interface TolerancePlan {
+  /** Tile / chart label */
+  label: string
+  /** One plain sentence shown under the switch */
+  explain: string
+  /** The move (bp) this user plans for, from the forecast and the top of its likely range */
+  planFor: (forecast: number, high: number) => number
+}
+
+/**
+ * Tolerance changes two things: when a pair is flagged (LEVEL_CUTOFFS in storm.ts) and how big a
+ * move the numbers plan for. Relaxed = a typical move; Balanced = halfway to the top of the likely
+ * range; Cautious = the top of the likely range. Always "either direction".
+ */
+export const TOLERANCE_PLAN: Record<Tolerance, TolerancePlan> = {
+  relaxed: {
+    label: 'Typical move',
+    explain: 'Relaxed: storms flagged later; numbers plan for a typical move.',
+    planFor: (f) => f,
+  },
+  balanced: {
+    label: 'Plan for',
+    explain: 'Balanced: numbers plan for a bit more than typical (halfway to the top of the likely range).',
+    planFor: (f, h) => (f + h) / 2,
+  },
+  cautious: {
+    label: 'Bad case',
+    explain: 'Cautious: storms flagged earlier; numbers plan for the top of the likely range.',
+    planFor: (_f, h) => h,
+  },
+}
+
+/** The plan-for move for one forecast point (falls back to the forecast when there's no range) */
+export function planMove(tolerance: Tolerance, forecast: number, high?: number | null): number {
+  return TOLERANCE_PLAN[tolerance].planFor(forecast, high ?? forecast)
+}
+
 export interface ForecastCheck {
   /** Windows that have finished (so we know what actually happened) */
   windows: number
@@ -34,20 +73,24 @@ export interface ForecastCheck {
   insideRange: number
   /** Typical size of the miss, as % of the forecast (median absolute error) */
   typicalMissPct: number
+  /** Share of windows where the actual move stayed within the tolerance's plan-for level */
+  withinPlan: number
 }
 
 /** How past forecasts compared with what actually happened, over the given points */
-export function forecastCheck(points: HistoryPoint[]): ForecastCheck | null {
+export function forecastCheck(points: HistoryPoint[], tolerance: Tolerance): ForecastCheck | null {
   const done = points.filter((p) => p.volActual != null && p.volForecast != null)
   if (done.length < 3) return null
   const inside = done.filter(
     (p) => p.volForecastLow != null && p.volForecastHigh != null && p.volActual! >= p.volForecastLow && p.volActual! <= p.volForecastHigh,
   ).length
   const misses = done.map((p) => Math.abs(p.volActual! - p.volForecast!) / p.volForecast!).sort((a, b) => a - b)
+  const within = done.filter((p) => p.volActual! <= planMove(tolerance, p.volForecast!, p.volForecastHigh)).length
   return {
     windows: done.length,
     insideRange: inside / done.length,
     typicalMissPct: misses[Math.floor(misses.length / 2)] * 100,
+    withinPlan: within / done.length,
   }
 }
 

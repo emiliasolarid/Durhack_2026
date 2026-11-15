@@ -17,9 +17,19 @@ export interface CameraFocus {
   lng: number
 }
 
+/** How often the forecasts refresh. The data is 1-minute bars, so the model updates every minute. */
+export const UPDATE_EVERY_MS = 60_000
+
 interface AppState {
-  /** The simulated "now" (the data is historical). Replay (step 7) moves this. */
+  /** The simulated "now" (the data is historical). The live clock moves it 1 min per real minute. */
   asOf: string
+  /** Live updates on (asOf advances every UPDATE_EVERY_MS) or paused */
+  live: boolean
+  /** Wall-clock time (ms) of the next refresh; drives the countdown */
+  nextUpdateAt: number
+  setLive: (live: boolean) => void
+  /** Advance the simulated clock by one minute (called by the live clock in App) */
+  tick: () => void
   tolerance: Tolerance
   setTolerance: (tolerance: Tolerance) => void
   /** Simple (everyday) or Pro (history + detail) view */
@@ -59,6 +69,14 @@ export const DEMO_AS_OF = '2026-07-02T18:40:00Z'
 
 export const useAppStore = create<AppState>()((set, get) => ({
   asOf: DEMO_AS_OF,
+  live: true,
+  nextUpdateAt: Date.now() + UPDATE_EVERY_MS,
+  setLive: (live) => set({ live, nextUpdateAt: Date.now() + UPDATE_EVERY_MS }),
+  tick: () =>
+    set((s) => ({
+      asOf: new Date(new Date(s.asOf).getTime() + 60_000).toISOString().replace('.000Z', 'Z'),
+      nextUpdateAt: Date.now() + UPDATE_EVERY_MS,
+    })),
   tolerance: 'balanced',
   setTolerance: (tolerance) => set({ tolerance }),
   mode: 'simple',

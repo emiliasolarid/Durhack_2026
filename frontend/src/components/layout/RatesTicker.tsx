@@ -7,6 +7,7 @@
 import { useMemo } from 'react'
 import { USING_SAMPLE_DATA } from '../../data/api'
 import ModeToggle from './ModeToggle'
+import NextUpdate from './NextUpdate'
 import { decimalsFor } from '../../data/mock'
 import { LEVEL_INFO, levelFor, worseLevel } from '../../lib/storm'
 import { findPair } from '../../lib/zones'
@@ -60,10 +61,6 @@ function TickerEntry({ item, copy = false }: { item: TickerItem; copy?: boolean 
   )
 }
 
-function formatUtc(iso: string | undefined): string {
-  if (!iso) return '--:--'
-  return new Date(iso).toISOString().slice(11, 16) + ' UTC'
-}
 
 export default function RatesTicker() {
   const snapshot = useAppStore((s) => s.snapshot)
@@ -98,7 +95,7 @@ export default function RatesTicker() {
             Sample data
           </span>
         )}
-        Updated <span className="num text-ink">{formatUtc(snapshot?.lastUpdated)}</span>
+        <NextUpdate />
       </span>
       <span className="shrink-0 border-l border-panel-border px-2">
         <ModeToggle />

@@ -6,7 +6,7 @@
  * Never shows or implies which way the rate will go. Labels sample data.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Info } from 'lucide-react'
+import { ArrowLeftRight, Info, Scale, Waves, type LucideIcon } from 'lucide-react'
 import {
   Area,
   CartesianGrid,
@@ -29,7 +29,9 @@ import {
   formatMoney,
   hhmm,
   hourlyProfile,
+  planMove,
   routePairs,
+  TOLERANCE_PLAN,
   slashPair,
   worstLeg,
 } from '../../lib/pro'
@@ -86,11 +88,39 @@ function Segmented<T extends string | number>({
   )
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({
+  label,
+  value,
+  sub,
+  Icon,
+  highlight,
+}: {
+  label: string
+  value: string
+  sub?: string
+  Icon: LucideIcon
+  /** CSS colour for the top edge + glow (the level colour on the move tile) */
+  highlight?: string
+}) {
+  const edge = highlight ?? 'var(--color-accent)'
   return (
-    <div className="min-w-0 rounded-lg bg-white/[0.04] px-2.5 py-2">
-      <div className="text-ink-muted truncate text-[10px] uppercase tracking-wider">{label}</div>
-      <div className="num text-ink mt-0.5 truncate text-sm">{value}</div>
+    <div
+      tabIndex={0}
+      title={sub ? `${label}: ${value} (${sub})` : `${label}: ${value}`}
+      style={{ ['--edge' as string]: edge }}
+      className="group relative min-w-0 cursor-default overflow-hidden rounded-xl border border-panel-border bg-gradient-to-b from-white/[0.07] to-white/[0.02] px-2.5 pt-2.5 pb-2 outline-none transition duration-200 ease-out hover:border-[color-mix(in_oklab,var(--edge)_55%,transparent)] hover:from-white/[0.11] hover:shadow-[0_8px_24px_-6px_color-mix(in_oklab,var(--edge)_45%,transparent)] focus-visible:ring-2 focus-visible:ring-accent motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03]"
+    >
+      {/* thin coloured edge on top, brighter on hover */}
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-[2px] opacity-50 transition-opacity group-hover:opacity-100"
+        style={{ background: `linear-gradient(90deg, transparent, ${edge}, transparent)` }}
+      />
+      <div className="text-ink-muted flex items-center gap-1 truncate text-[9.5px] font-medium uppercase tracking-wide">
+        <Icon className="size-3 shrink-0 transition-colors group-hover:text-[var(--edge)]" aria-hidden />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="num text-ink mt-1 truncate text-[15px] font-medium transition-colors group-hover:text-white">{value}</div>
       {sub && <div className="text-ink-muted mt-0.5 truncate text-[10px]">{sub}</div>}
     </div>
   )
@@ -107,19 +137,36 @@ function SectionTitle({ title, sub }: { title: string; sub?: string }) {
 
 function LevelBadge({ pair, tolerance }: { pair: PairSnapshot; tolerance: Tolerance }) {
   const level = levelFor(pair, tolerance)
-  if (level === 'nodata') return <span className="text-ink-muted text-xs">No forecast right now</span>
-  const info = LEVEL_INFO[level]
   return (
-    <span className="flex flex-col gap-0.5">
-      <span className={`flex items-center gap-1.5 text-xs ${info.textClass}`}>
-        <info.Icon className="size-4" aria-hidden />
-        <span className="font-medium">{info.name}</span>
-        <span className="text-ink-muted">· {info.volatility}</span>
-      </span>
-      <span className="text-ink-muted text-[11px]">
-        Busier than <span className="num text-ink">{Math.round(pair.percentile * 100)}%</span> of this pair's usual 30-min windows
-      </span>
-    </span>
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <span className="num text-ink-muted text-xs">{slashPair(pair.pair)}</span>
+        {level === 'nodata' ? (
+          <span className="text-ink-muted text-xs">No forecast right now</span>
+        ) : (
+          <span
+            className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs ${LEVEL_INFO[level].textClass}`}
+            style={{
+              background: `color-mix(in oklab, var(${LEVEL_INFO[level].colorVar}) 12%, transparent)`,
+              borderColor: `color-mix(in oklab, var(${LEVEL_INFO[level].colorVar}) 35%, transparent)`,
+            }}
+          >
+            {(() => {
+              const { Icon } = LEVEL_INFO[level]
+              return <Icon className="size-3.5" aria-hidden />
+            })()}
+            <span className="font-medium">{LEVEL_INFO[level].name}</span>
+            <span className="text-ink-muted">· {LEVEL_INFO[level].volatility}</span>
+          </span>
+        )}
+      </div>
+      {level !== 'nodata' && (
+        <p className="text-ink-muted text-[11px]">
+          Busier than <span className="num text-ink">{Math.round(pair.percentile * 100)}%</span> of this pair's usual 30-min
+          windows.
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -128,6 +175,7 @@ function LevelBadge({ pair, tolerance }: { pair: PairSnapshot; tolerance: Tolera
 interface ChartRow {
   ts: number
   forecast: number | null
+  plan: number | null
   band: [number, number] | null
   actual: number | null
   spread: number | null
@@ -144,9 +192,10 @@ function ChartTip({ active, payload }: TooltipContentProps) {
       <strong className="text-ink">{hhmm(new Date(row.ts).toISOString())} UTC</strong>
       {'forecast' in row && row.forecast !== undefined && (
         <>
+          <span>Plan for {fmt(row.plan)}</span>
           <span>
             Forecast {fmt(row.forecast)}
-            {row.band && ` (${row.band[0].toFixed(1)}–${row.band[1].toFixed(1)})`}
+            {row.band && ` (range ${row.band[0].toFixed(1)}–${row.band[1].toFixed(1)})`}
           </span>
           <span>Actual {row.actual == null ? 'not known yet' : fmt(row.actual)}</span>
         </>
@@ -208,13 +257,14 @@ export default function ProPanel() {
       shown.map((p) => ({
         ts: new Date(p.t).getTime(),
         forecast: p.volForecast,
+        plan: p.volForecast == null ? null : planMove(tolerance, p.volForecast, p.volForecastHigh),
         band: p.volForecastLow != null && p.volForecastHigh != null ? [p.volForecastLow, p.volForecastHigh] : null,
         actual: p.volActual,
         spread: p.spreadBps,
       })),
-    [shown],
+    [shown, tolerance],
   )
-  const check = useMemo(() => forecastCheck(shown), [shown])
+  const check = useMemo(() => forecastCheck(shown, tolerance), [shown, tolerance])
   const hours = useMemo(() => (history ? hourlyProfile(history.points, tolerance) : []), [history, tolerance])
   const nowHour = new Date(asOf).getUTCHours()
   // Stretch the shading across this pair's own quietest → busiest hour so the pattern is readable
@@ -231,10 +281,14 @@ export default function ProPanel() {
   }
 
   const horizon = pair.forecast.horizonsMin.at(-1) ?? 30
-  const move = pair.forecast.vol.at(-1) ?? 0
+  const forecastMove = pair.forecast.vol.at(-1) ?? 0
   const moveLow = pair.forecast.volLow?.at(-1)
   const moveHigh = pair.forecast.volHigh?.at(-1)
-  const ratio = costRatioPct(pair)
+  const plan = TOLERANCE_PLAN[tolerance]
+  const move = planMove(tolerance, forecastMove, moveHigh)
+  const ratio = costRatioPct(pair, move)
+  const level = levelFor(pair, tolerance)
+  const levelColor = level === 'nodata' ? 'var(--color-nodata)' : `var(${LEVEL_INFO[level].colorVar})`
   const band = costBand(ratio)
   const statusNote = STATUS_NOTE[pair.status]
   const confident = pair.status === 'live' || pair.status === 'thin'
@@ -252,6 +306,7 @@ export default function ProPanel() {
           </h2>
           <Segmented label="Tolerance" options={TOLERANCES} value={tolerance} onChange={setTolerance} />
         </div>
+        <p className="text-ink-faint text-[11px] leading-snug">{TOLERANCE_PLAN[tolerance].explain}</p>
 
         {legs.length > 1 && (
           <div className="space-y-1">
@@ -281,28 +336,33 @@ export default function ProPanel() {
           </div>
         )}
 
-        <div className="flex items-start gap-2">
-          <span className="num text-ink-muted pt-px text-xs">{slashPair(pair.pair)}</span>
-          <LevelBadge pair={pair} tolerance={tolerance} />
-        </div>
+        <LevelBadge pair={pair} tolerance={tolerance} />
         {statusNote && <p className="rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-ink-muted">{statusNote}</p>}
       </div>
 
       {/* Now */}
       <div className="grid grid-cols-3 gap-1.5">
-        <Stat label="Mid rate" value={pair.mid.toFixed(decimalsFor(pair.pair) + 1)} sub={`${slashPair(pair.pair)}`} />
-        <Stat label="Spread" value={`${pair.spreadBps.toFixed(2)} bp`} sub="bid–ask, now" />
         <Stat
-          label={`${horizon}-min move`}
+          Icon={ArrowLeftRight}
+          label="Mid rate"
+          value={pair.mid.toFixed(decimalsFor(pair.pair) + 1)}
+          sub={slashPair(pair.pair)}
+        />
+        <Stat Icon={Scale} label="Spread" value={`${pair.spreadBps.toFixed(2)} bp`} sub="bid–ask, now" />
+        <Stat
+          Icon={Waves}
+          label={plan.label}
           value={confident ? `±${move.toFixed(1)} bp` : '—'}
-          sub={confident ? `≈ ±${formatMoney(bpToMoney(amount, move), base)}` : 'no forecast'}
+          sub={confident ? `≈ ±${formatMoney(bpToMoney(amount, move), base)} · ${horizon} min` : 'no forecast'}
+          highlight={levelColor}
         />
       </div>
       {confident && (
         <p className="text-ink-muted -mt-2 text-[11px] leading-snug">
-          On your {formatMoney(amount, base)}, a typical move over the next {horizon} min is worth about ±
-          {formatMoney(bpToMoney(amount, move), base)}, either direction (likely range {moveLow?.toFixed(1)}–
-          {moveHigh?.toFixed(1)} bp).
+          On your {formatMoney(amount, base)}, plan for a move of about ±
+          <span className="num text-ink">{formatMoney(bpToMoney(amount, move), base)}</span> over the next {horizon} min,
+          either direction (forecast {forecastMove.toFixed(1)} bp, likely range {moveLow?.toFixed(1)}–{moveHigh?.toFixed(1)}{' '}
+          bp).
           {band && ratio != null && (
             <>
               {' '}
@@ -328,7 +388,7 @@ export default function ProPanel() {
       <section className="space-y-1.5" aria-label="Forecast versus actual volatility">
         <SectionTitle title="Forecast vs what happened" sub={`bp moved over each ${horizon}-min window`} />
         <div className="flex gap-3">
-          <LegendKey dashed color="var(--color-series-forecast)" label="Forecast (shaded: likely range)" />
+          <LegendKey dashed color="var(--color-series-forecast)" label={`${plan.label} (shaded: likely range)`} />
           <LegendKey color="var(--color-series-actual)" label="Actual" />
         </div>
         <div className="h-36">
@@ -363,7 +423,7 @@ export default function ProPanel() {
                 activeDot={false}
               />
               <Line
-                dataKey="forecast"
+                dataKey="plan"
                 stroke="var(--color-series-forecast)"
                 strokeWidth={2}
                 strokeDasharray="4 3"
@@ -379,9 +439,10 @@ export default function ProPanel() {
         <p className="text-ink-muted text-[11px] leading-snug">
           {check ? (
             <>
-              Last {rangeH} h: the actual move landed inside the forecast range in{' '}
-              <span className="num text-ink">{Math.round(check.insideRange * 100)}%</span> of {check.windows} windows; typical
-              miss <span className="num text-ink">±{Math.round(check.typicalMissPct)}%</span>.
+              Last {rangeH} h: the actual move stayed within your plan-for level in{' '}
+              <span className="num text-ink">{Math.round(check.withinPlan * 100)}%</span> of {check.windows} windows (inside
+              the likely range <span className="num text-ink">{Math.round(check.insideRange * 100)}%</span>; typical miss{' '}
+              <span className="num text-ink">±{Math.round(check.typicalMissPct)}%</span>).
             </>
           ) : (
             'Not enough finished windows in this range yet.'

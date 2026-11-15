@@ -30,8 +30,22 @@ function useSnapshotLoader() {
   }, [asOf, base, setSnapshot])
 }
 
+/** Live clock: every UPDATE_EVERY_MS the simulated "now" moves on 1 minute and everything refreshes */
+function useLiveClock() {
+  const live = useAppStore((s) => s.live)
+  useEffect(() => {
+    if (!live) return
+    const id = window.setInterval(() => {
+      const { nextUpdateAt, tick } = useAppStore.getState()
+      if (Date.now() >= nextUpdateAt) tick()
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [live])
+}
+
 export default function App() {
   useSnapshotLoader()
+  useLiveClock()
   const mode = useAppStore((s) => s.mode)
 
   return (

@@ -74,10 +74,13 @@ export const COST_BANDS: { band: CostBand; below: number; label: string }[] = [
   { band: 'very_high', below: Infinity, label: 'Very high trading cost' },
 ]
 
-/** Same definition as models/cost_ratio.py: mean forecast spread ÷ forecast vol over the window, in % */
-export function costRatioPct(pair: PairSnapshot): number | null {
+/**
+ * Same definition as models/cost_ratio.py: mean forecast spread ÷ forecast vol over the window, in %.
+ * Pass `moveBps` to compare against the tolerance's "plan-for" move instead (Pro view).
+ */
+export function costRatioPct(pair: PairSnapshot, moveBps?: number): number | null {
   const { spreadBps, vol } = pair.forecast
-  const move = vol[vol.length - 1]
+  const move = moveBps ?? vol[vol.length - 1]
   if (!spreadBps.length || !move) return null
   const meanSpread = spreadBps.reduce((s, v) => s + v, 0) / spreadBps.length
   return (meanSpread / move) * 100
