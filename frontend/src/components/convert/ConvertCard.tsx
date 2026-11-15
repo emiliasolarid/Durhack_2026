@@ -16,11 +16,11 @@ function formatAmount(n: number): string {
   return n.toLocaleString('en-GB', { maximumFractionDigits: 2 })
 }
 
-/** Keep digits and one decimal point; "12,500.5" → 12500.5 */
+/** Keep digits and one decimal point; "12,500.5" → 12500.5 (not capped: see the input handler) */
 function parseAmount(text: string): number {
   const cleaned = text.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1')
   const n = Number(cleaned)
-  return Number.isFinite(n) ? Math.min(n, MAX_AMOUNT) : 0
+  return Number.isFinite(n) ? n : 0
 }
 
 function CurrencySelect({
@@ -82,8 +82,15 @@ export default function ConvertCard() {
           onChange={(e) => {
             const text = e.target.value
             if (!ALLOWED_INPUT.test(text)) return // letters, spaces, a 2nd dot… are refused
+            const n = parseAmount(text)
+            if (n > MAX_AMOUNT) {
+              // Over the cap: show the capped number in the box too, so box and conversion always agree
+              setDraft(formatAmount(MAX_AMOUNT))
+              setAmount(MAX_AMOUNT)
+              return
+            }
             setDraft(text)
-            setAmount(parseAmount(text))
+            setAmount(n)
           }}
           onBlur={() => setDraft(formatAmount(amount))}
           className="num h-10 w-full rounded-lg border border-panel-border bg-white/5 px-2.5 text-lg text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"

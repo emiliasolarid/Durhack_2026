@@ -94,7 +94,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setBase: (code) => {
     const { quote, base } = get()
-    if (code === quote) set({ base: code, quote: base }) // picking the same currency swaps them
+    // Picking the "To" currency as "From" swaps them, so the camera follows the new "To" (old From)
+    if (code === quote) set({ base: code, quote: base, ...focusZone(base) })
     else set({ base: code })
   },
 

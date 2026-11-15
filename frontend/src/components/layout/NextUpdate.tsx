@@ -4,12 +4,11 @@
  */
 import { useEffect, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
+import { hhmm } from '../../lib/pro'
 import { UPDATE_EVERY_MS, useAppStore } from '../../store/useAppStore'
 
-function formatUtc(iso: string | undefined): string {
-  if (!iso) return '--:--'
-  return new Date(iso).toISOString().slice(11, 16) + ' UTC'
-}
+/** Safe for empty / malformed timestamps (shows "--:--" instead of crashing) */
+const formatUtc = (iso: string | undefined) => `${hhmm(iso)} UTC`
 
 export default function NextUpdate() {
   const lastUpdated = useAppStore((s) => s.snapshot?.lastUpdated)

@@ -44,6 +44,12 @@
     0%, 100% { box-shadow: 0 0 0 0 rgb(255 46 59 / 0.55); }
     50% { box-shadow: 0 0 0 6px rgb(255 46 59 / 0); }
   }
+  /* Tolerance switch: a brief accent flash on whatever just changed */
+  --animate-flash: flash 0.9s ease-out;
+  @keyframes flash {
+    from { background-color: rgb(124 156 255 / 0.28); }
+    to { background-color: transparent; }
+  }
   @keyframes ticker {
     from { transform: translateX(0); }
     to { transform: translateX(-50%); }

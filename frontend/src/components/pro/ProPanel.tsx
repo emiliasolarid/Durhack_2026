@@ -198,7 +198,7 @@ function ChartTip({ active, payload, normal }: TooltipContentProps & { normal?: 
   const fmt = (v: number | null, unit = ' bp') => (v == null ? '—' : `${v.toFixed(2)}${unit}`)
   return (
     <div className="globe-tip chart-tip num">
-      <strong className="text-ink">{hhmm(new Date(row.ts).toISOString())} UTC</strong>
+      <strong className="text-ink">{hhmm(row.ts)} UTC</strong>
       {'forecast' in row && row.forecast !== undefined && (
         <>
           <span>Plan for {fmt(row.plan)}</span>
@@ -478,7 +478,7 @@ export default function ProPanel() {
                 type="number"
                 scale="time"
                 domain={['dataMin', 'dataMax']}
-                tickFormatter={(v: number) => hhmm(new Date(v).toISOString())}
+                tickFormatter={(v: number) => hhmm(v)}
                 tick={axisTick}
                 tickLine={false}
                 axisLine={false}

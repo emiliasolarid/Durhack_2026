@@ -30,8 +30,10 @@ export const slashPair = (pair: string) => `${pair.slice(0, 3)}/${pair.slice(3)}
 export interface TolerancePlan {
   /** Tile / chart label */
   label: string
-  /** One plain sentence shown under the switch */
+  /** One plain sentence shown under the switch (Pro) */
   explain: string
+  /** Shorter, plain-English version for the Simple view */
+  simple: string
   /** The move (bp) this user plans for, from the forecast and the top of its likely range */
   planFor: (forecast: number, high: number) => number
 }
@@ -45,16 +47,19 @@ export const TOLERANCE_PLAN: Record<Tolerance, TolerancePlan> = {
   relaxed: {
     label: 'Typical move',
     explain: 'Relaxed: storms flagged later; numbers plan for a typical move.',
+    simple: 'Relaxed: storms flagged later, plans for a typical move.',
     planFor: (f) => f,
   },
   balanced: {
     label: 'Plan for',
     explain: 'Balanced: numbers plan for a bit more than typical (halfway to the top of the likely range).',
+    simple: 'Balanced: the middle ground, plans for a bit more than a typical move.',
     planFor: (f, h) => (f + h) / 2,
   },
   cautious: {
     label: 'Bad case',
     explain: 'Cautious: storms flagged earlier; numbers plan for the top of the likely range.',
+    simple: 'Cautious: storms flagged earlier, plans for a bigger move.',
     planFor: (_f, h) => h,
   },
 }
@@ -130,7 +135,13 @@ export function formatMoney(value: number, currency: CurrencyCode): string {
   }
 }
 
-/** "2026-07-02T18:40:00Z" → "18:40" (UTC) */
-export function hhmm(iso: string): string {
-  return new Date(iso).toISOString().slice(11, 16)
+/**
+ * "2026-07-02T18:40:00Z" (or epoch ms) → "18:40" (UTC).
+ * Never throws: an empty or malformed timestamp from the data feed shows "--:--" instead of
+ * crashing the app (new Date('').toISOString() throws a RangeError).
+ */
+export function hhmm(time: string | number | null | undefined): string {
+  if (time == null || time === '') return '--:--'
+  const d = new Date(time)
+  return Number.isNaN(d.getTime()) ? '--:--' : d.toISOString().slice(11, 16)
 }
