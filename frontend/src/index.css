@@ -25,6 +25,7 @@
   --color-unsettled: #fbbf24;  /* amber + cloud      */
   --color-storm: #f43f8e;      /* magenta + lightning */
   --color-nodata: #334155;
+  --color-extreme: #ff2e3b;    /* BRIGHT red + warning triangle: forecast ≥ 1.5× normal */
 
   /* Pro charts: two data series (validated: CVD-safe on the dark panel). Forecast is also dashed. */
   --color-series-forecast: #6b8cf5;
@@ -37,6 +38,12 @@
 
   /* Rates ticker: the list is drawn twice and slides left by half its width, so it loops seamlessly */
   --animate-ticker: ticker 45s linear infinite;
+  /* Extreme warning: a slow red glow pulse */
+  --animate-alarm: alarm 1.6s ease-in-out infinite;
+  @keyframes alarm {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(255 46 59 / 0.55); }
+    50% { box-shadow: 0 0 0 6px rgb(255 46 59 / 0); }
+  }
   @keyframes ticker {
     from { transform: translateX(0); }
     to { transform: translateX(-50%); }
@@ -96,4 +103,17 @@ div.float-tooltip-kap {
 .globe-tip span {
   color: var(--color-ink-muted);
   font-size: 12px;
+}
+/* Pro chart: soft glow on the two main lines */
+.chart-glow-actual .recharts-area-curve {
+  filter: drop-shadow(0 0 4px rgb(200 120 58 / 0.65));
+}
+.chart-glow-forecast .recharts-line-curve {
+  filter: drop-shadow(0 0 3px rgb(107 140 245 / 0.6));
+}
+/* Chart tooltips sit over lines, so they need a solid background */
+.globe-tip.chart-tip {
+  background: rgb(9 13 26 / 0.96);
+  border-color: rgb(148 163 184 / 0.28);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
 }

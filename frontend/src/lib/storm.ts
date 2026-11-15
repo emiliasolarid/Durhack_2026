@@ -7,7 +7,7 @@
  *
  * Every level has a word + icon + colour, and nothing here implies which way a rate will move.
  */
-import { CloudLightning, CloudSun, Sun, type LucideIcon } from 'lucide-react'
+import { CloudLightning, CloudSun, Sun, TriangleAlert, type LucideIcon } from 'lucide-react'
 import type { PairSnapshot, StormLevel, Tolerance } from '../types'
 
 export type ForecastLevel = Exclude<StormLevel, 'nodata'>
@@ -25,7 +25,18 @@ export const STORM_LEVELS: StormLevelInfo[] = [
   { level: 'calm', name: 'Calm', volatility: 'Low volatility', Icon: Sun, textClass: 'text-calm', colorVar: '--color-calm' },
   { level: 'unsettled', name: 'Unsettled', volatility: 'Medium volatility', Icon: CloudSun, textClass: 'text-unsettled', colorVar: '--color-unsettled' },
   { level: 'storm', name: 'Storm', volatility: 'High volatility', Icon: CloudLightning, textClass: 'text-storm', colorVar: '--color-storm' },
+  { level: 'extreme', name: 'Extreme', volatility: '1.5× normal or more', Icon: TriangleAlert, textClass: 'text-extreme', colorVar: '--color-extreme' },
 ]
+
+/** Forecast 30-min vol at or above this multiple of the pair's normal → "Extreme" (Emilia, 15 Nov 01:24) */
+export const EXTREME_RATIO = 1.5
+
+/** Forecast 30-min vol ÷ the pair's normal 30-min vol, or null when we don't know "normal" */
+export function volRatio(pair: PairSnapshot | undefined): number | null {
+  const move = pair?.forecast?.vol.at(-1)
+  const normal = pair?.volNormal30m
+  return move && normal ? move / normal : null
+}
 
 export const LEVEL_INFO = Object.fromEntries(STORM_LEVELS.map((l) => [l.level, l])) as Record<ForecastLevel, StormLevelInfo>
 
@@ -44,13 +55,15 @@ const NO_FORECAST_STATUSES = new Set(['rollover', 'stale', 'no_data'])
 
 export function levelFor(pair: PairSnapshot | undefined, tolerance: Tolerance): StormLevel {
   if (!pair || NO_FORECAST_STATUSES.has(pair.status)) return 'nodata'
+  const ratio = volRatio(pair)
+  if (ratio != null && ratio >= EXTREME_RATIO) return 'extreme' // same for every tolerance: always warn
   const [unsettledFrom, stormFrom] = LEVEL_CUTOFFS[tolerance]
   if (pair.percentile >= stormFrom) return 'storm'
   if (pair.percentile >= unsettledFrom) return 'unsettled'
   return 'calm'
 }
 
-const RANK: Record<StormLevel, number> = { nodata: -1, calm: 0, unsettled: 1, storm: 2 }
+export const RANK: Record<StormLevel, number> = { nodata: -1, calm: 0, unsettled: 1, storm: 2, extreme: 3 }
 
 /** The more severe of two levels (used for cross rates like EUR/JPY). "No data" wins, to stay honest. */
 export function worseLevel(a: StormLevel, b: StormLevel): StormLevel {

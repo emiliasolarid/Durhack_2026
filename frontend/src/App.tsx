@@ -9,6 +9,7 @@ import ConvertCard from './components/convert/ConvertCard'
 import RatesTicker from './components/layout/RatesTicker'
 import StormLegend from './components/layout/StormLegend'
 import ProPanel from './components/pro/ProPanel'
+import ExtremeAlert from './components/layout/ExtremeAlert'
 import { getSnapshot } from './data/api'
 import { useAppStore } from './store/useAppStore'
 
@@ -57,6 +58,15 @@ export default function App() {
       <header className="absolute top-3 left-3 right-3">
         <RatesTicker />
       </header>
+
+      {/* Bright red warning when any pair is "Extreme" (≥ 1.5× its normal move) */}
+      <div
+        className={`pointer-events-none absolute top-15 left-3 flex justify-center [&>*]:pointer-events-auto ${
+          mode === 'pro' ? 'right-[400px]' : 'right-3'
+        }`}
+      >
+        <ExtremeAlert />
+      </div>
 
       {/* Bottom-left: convert card */}
       <div className="absolute bottom-3 left-3">

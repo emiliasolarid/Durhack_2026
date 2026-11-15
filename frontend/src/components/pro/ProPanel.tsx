@@ -22,7 +22,7 @@ import {
 } from 'recharts'
 import { getHistory, USING_SAMPLE_DATA } from '../../data/api'
 import { decimalsFor } from '../../data/mock'
-import { costBand, costRatioPct, LEVEL_INFO, levelFor } from '../../lib/storm'
+import { costBand, costRatioPct, EXTREME_RATIO, LEVEL_INFO, levelFor, volRatio } from '../../lib/storm'
 import {
   bpToMoney,
   forecastCheck,
@@ -160,11 +160,19 @@ function LevelBadge({ pair, tolerance }: { pair: PairSnapshot; tolerance: Tolera
           </span>
         )}
       </div>
-      {level !== 'nodata' && (
-        <p className="text-ink-muted text-[11px]">
-          Busier than <span className="num text-ink">{Math.round(pair.percentile * 100)}%</span> of this pair's usual 30-min
-          windows.
+      {level === 'extreme' ? (
+        <p className="text-ink rounded-lg border border-extreme/50 bg-extreme/15 px-2.5 py-1.5 text-[11px] leading-snug">
+          <span className="text-extreme font-semibold">Warning:</span> the next 30 min are likely to move{' '}
+          <span className="num font-semibold">{volRatio(pair)?.toFixed(1)}×</span> this pair's normal size (flag at{' '}
+          {EXTREME_RATIO}×), either direction. Expect bigger swings than usual.
         </p>
+      ) : (
+        level !== 'nodata' && (
+          <p className="text-ink-muted text-[11px]">
+            Busier than <span className="num text-ink">{Math.round(pair.percentile * 100)}%</span> of this pair's usual
+            30-min windows.
+          </p>
+        )
       )}
     </div>
   )
@@ -183,12 +191,13 @@ interface ChartRow {
 
 const axisTick = { fill: 'var(--color-ink-faint)', fontSize: 10 }
 
-function ChartTip({ active, payload }: TooltipContentProps) {
+function ChartTip({ active, payload, normal }: TooltipContentProps & { normal?: number }) {
   if (!active || !payload?.length) return null
   const row = payload[0].payload as ChartRow
+  const xNormal = row.actual != null && normal ? row.actual / normal : null
   const fmt = (v: number | null, unit = ' bp') => (v == null ? '—' : `${v.toFixed(2)}${unit}`)
   return (
-    <div className="globe-tip num">
+    <div className="globe-tip chart-tip num">
       <strong className="text-ink">{hhmm(new Date(row.ts).toISOString())} UTC</strong>
       {'forecast' in row && row.forecast !== undefined && (
         <>
@@ -197,7 +206,13 @@ function ChartTip({ active, payload }: TooltipContentProps) {
             Forecast {fmt(row.forecast)}
             {row.band && ` (range ${row.band[0].toFixed(1)}–${row.band[1].toFixed(1)})`}
           </span>
-          <span>Actual {row.actual == null ? 'not known yet' : fmt(row.actual)}</span>
+          <span>
+            Actual {row.actual == null ? 'not known yet' : fmt(row.actual)}
+            {xNormal != null && ` · ${xNormal.toFixed(1)}× normal`}
+          </span>
+          {xNormal != null && xNormal >= EXTREME_RATIO && (
+            <span style={{ color: 'var(--color-extreme)' }}>⚠ Extreme window</span>
+          )}
         </>
       )}
       <span>Spread {fmt(row.spread)}</span>
@@ -265,6 +280,26 @@ export default function ProPanel() {
     [shown, tolerance],
   )
   const check = useMemo(() => forecastCheck(shown, tolerance), [shown, tolerance])
+  const normal = pair?.volNormal30m
+  const extremeLine = normal ? normal * EXTREME_RATIO : undefined
+  // Stretches of time where what actually happened was Extreme (≥ 1.5× normal) → red bands on the chart
+  const extremeSpans = useMemo(() => {
+    if (!extremeLine) return []
+    const spans: [number, number][] = []
+    let start: number | null = null
+    let last = 0
+    for (const r of rows) {
+      const hot = r.actual != null && r.actual >= extremeLine
+      if (hot && start == null) start = r.ts
+      if (!hot && start != null) {
+        spans.push([start, last])
+        start = null
+      }
+      last = r.ts
+    }
+    if (start != null) spans.push([start, last])
+    return spans
+  }, [rows, extremeLine])
   const hours = useMemo(() => (history ? hourlyProfile(history.points, tolerance) : []), [history, tolerance])
   const nowHour = new Date(asOf).getUTCHours()
   // Stretch the shading across this pair's own quietest → busiest hour so the pattern is readable
@@ -296,7 +331,7 @@ export default function ProPanel() {
   return (
     <aside
       aria-label="Pro view"
-      className="glass flex max-h-full w-[min(380px,calc(100vw-1.5rem))] flex-col gap-4 overflow-y-auto p-4"
+      className="glass flex max-h-full w-[min(380px,calc(100vw-1.5rem))] flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0"
     >
       {/* Header */}
       <div className="space-y-2">
@@ -384,17 +419,60 @@ export default function ProPanel() {
         />
       </div>
 
-      {/* Forecast vs actual */}
-      <section className="space-y-1.5" aria-label="Forecast versus actual volatility">
-        <SectionTitle title="Forecast vs what happened" sub={`bp moved over each ${horizon}-min window`} />
-        <div className="flex gap-3">
-          <LegendKey dashed color="var(--color-series-forecast)" label={`${plan.label} (shaded: likely range)`} />
-          <LegendKey color="var(--color-series-actual)" label="Actual" />
+      {/* Forecast vs actual — the hero chart of the Pro view */}
+      <section
+        aria-label="Forecast versus actual volatility"
+        className="group/chart relative shrink-0 space-y-2 overflow-hidden rounded-xl border border-panel-border bg-gradient-to-b from-[color-mix(in_oklab,var(--color-series-forecast)_9%,transparent)] to-white/[0.015] p-3 transition duration-300 hover:border-[color-mix(in_oklab,var(--color-series-forecast)_45%,transparent)] hover:shadow-[0_14px_36px_-14px_color-mix(in_oklab,var(--color-series-forecast)_70%,transparent)] motion-safe:hover:-translate-y-0.5"
+      >
+        <span
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-[2px] opacity-60 transition-opacity group-hover/chart:opacity-100"
+          style={{ background: 'linear-gradient(90deg, transparent, var(--color-series-forecast), var(--color-series-actual), transparent)' }}
+        />
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="font-display text-ink text-sm font-semibold tracking-tight">Forecast vs what happened</h3>
+            <p className="text-ink-faint text-[10px]">bp moved per {horizon}-min window</p>
+          </div>
+          {confident && (
+            <div className="text-right">
+              <div className="num text-ink text-base leading-none font-semibold whitespace-nowrap">
+                <span className="text-ink-faint mr-1 text-[10px] font-normal">next</span>
+                {forecastMove.toFixed(1)} bp
+              </div>
+              {normal && (
+                <div
+                  className={`num mt-1 text-[10px] ${forecastMove / normal >= EXTREME_RATIO ? 'text-extreme font-semibold' : 'text-ink-muted'}`}
+                >
+                  {forecastMove / normal >= EXTREME_RATIO && '⚠ '}
+                  {(forecastMove / normal).toFixed(1)}× normal
+                </div>
+              )}
+            </div>
+          )}
         </div>
-        <div className="h-36">
-          <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 340, height: 144 }}>
-            <ComposedChart data={rows} margin={{ top: 6, right: 4, bottom: 0, left: -18 }}>
-              <CartesianGrid vertical={false} stroke="var(--color-panel-border)" />
+
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <LegendKey dashed color="var(--color-series-forecast)" label={`${plan.label} · shaded = likely range`} />
+          <LegendKey color="var(--color-series-actual)" label="Actual" />
+          {normal && <LegendKey dashed color="var(--color-ink-faint)" label="Normal" />}
+          {extremeLine && <LegendKey dashed color="var(--color-extreme)" label={`Extreme (${EXTREME_RATIO}× normal)`} />}
+        </div>
+
+        <div className="h-48">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 330, height: 192 }}>
+            <ComposedChart data={rows} margin={{ top: 10, right: 6, bottom: 0, left: -18 }}>
+              <defs>
+                <linearGradient id="fill-actual" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--color-series-actual)" stopOpacity={0.38} />
+                  <stop offset="100%" stopColor="var(--color-series-actual)" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="fill-band" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--color-series-forecast)" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="var(--color-series-forecast)" stopOpacity={0.08} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} stroke="var(--color-panel-border)" strokeDasharray="2 4" />
               <XAxis
                 dataKey="ts"
                 type="number"
@@ -406,48 +484,99 @@ export default function ProPanel() {
                 axisLine={false}
                 minTickGap={28}
               />
-              <YAxis tick={axisTick} tickLine={false} axisLine={false} width={40} />
+              <YAxis
+                tick={axisTick}
+                tickLine={false}
+                axisLine={false}
+                width={40}
+                domain={[0, (max: number) => Math.ceil(Math.max(max, (extremeLine ?? 0) * 1.12))]}
+              />
+              {/* when what happened was Extreme */}
+              {extremeSpans.map(([a, b]) => (
+                <ReferenceArea key={a} x1={a} x2={b === a ? a + 5 * 60_000 : b} fill="var(--color-extreme)" fillOpacity={0.16} ifOverflow="hidden" />
+              ))}
+              {/* the last 30 min: no actual yet */}
               <ReferenceArea
                 x1={nowMs - horizon * 60_000}
                 x2={nowMs}
                 fill="var(--color-ink)"
-                fillOpacity={0.04}
+                fillOpacity={0.05}
                 ifOverflow="hidden"
               />
+              {normal && (
+                <ReferenceLine
+                  y={normal}
+                  stroke="var(--color-ink-faint)"
+                  strokeDasharray="1 3"
+                />
+              )}
+              {extremeLine && (
+                <ReferenceLine
+                  y={extremeLine}
+                  stroke="var(--color-extreme)"
+                  strokeDasharray="5 3"
+                  strokeOpacity={0.85}
+                  label={{ value: `${EXTREME_RATIO}× normal`, position: 'insideTopLeft', fill: 'var(--color-extreme)', fontSize: 9 }}
+                />
+              )}
+              <Area dataKey="band" stroke="none" fill="url(#fill-band)" isAnimationActive={false} activeDot={false} />
               <Area
-                dataKey="band"
-                stroke="none"
-                fill="var(--color-series-forecast)"
-                fillOpacity={0.16}
+                dataKey="actual"
+                className="chart-glow-actual"
+                stroke="var(--color-series-actual)"
+                strokeWidth={2}
+                fill="url(#fill-actual)"
                 isAnimationActive={false}
-                activeDot={false}
+                activeDot={{ r: 4.5, stroke: 'var(--color-space)', strokeWidth: 2, fill: 'var(--color-series-actual)' }}
               />
               <Line
                 dataKey="plan"
+                className="chart-glow-forecast"
                 stroke="var(--color-series-forecast)"
                 strokeWidth={2}
-                strokeDasharray="4 3"
+                strokeDasharray="5 3"
                 dot={false}
                 isAnimationActive={false}
+                activeDot={{ r: 4, stroke: 'var(--color-space)', strokeWidth: 2, fill: 'var(--color-series-forecast)' }}
               />
-              <Line dataKey="actual" stroke="var(--color-series-actual)" strokeWidth={2} dot={false} isAnimationActive={false} />
-              <ReferenceLine x={nowMs} stroke="var(--color-ink-muted)" strokeDasharray="2 3" />
-              <Tooltip content={ChartTip} cursor={{ stroke: 'var(--color-ink-faint)' }} />
+              <ReferenceLine
+                x={nowMs}
+                stroke="var(--color-ink-muted)"
+                strokeDasharray="2 3"
+                label={{ value: 'now', position: 'insideTopRight', fill: 'var(--color-ink-muted)', fontSize: 9 }}
+              />
+              <Tooltip
+                content={(props) => <ChartTip {...props} normal={normal} />}
+                cursor={{ stroke: 'var(--color-ink-muted)', strokeDasharray: '2 2' }}
+              />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        <p className="text-ink-muted text-[11px] leading-snug">
-          {check ? (
+
+        {check ? (
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              { k: 'Within your plan', v: `${Math.round(check.withinPlan * 100)}%` },
+              { k: 'Inside likely range', v: `${Math.round(check.insideRange * 100)}%` },
+              { k: 'Typical miss', v: `±${Math.round(check.typicalMissPct)}%` },
+            ].map((c) => (
+              <div key={c.k} className="rounded-lg bg-white/[0.04] px-2 py-1.5 text-center">
+                <div className="num text-ink text-sm font-medium">{c.v}</div>
+                <div className="text-ink-muted text-[9.5px]">{c.k}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-ink-muted text-[11px]">Not enough finished windows in this range yet.</p>
+        )}
+        <p className="text-ink-faint text-[10px] leading-snug">
+          Last {rangeH} h, {check?.windows ?? 0} finished windows. Grey strip = last {horizon} min, no actual yet.
+          {extremeSpans.length > 0 && (
             <>
-              Last {rangeH} h: the actual move stayed within your plan-for level in{' '}
-              <span className="num text-ink">{Math.round(check.withinPlan * 100)}%</span> of {check.windows} windows (inside
-              the likely range <span className="num text-ink">{Math.round(check.insideRange * 100)}%</span>; typical miss{' '}
-              <span className="num text-ink">±{Math.round(check.typicalMissPct)}%</span>).
+              {' '}
+              <span className="text-extreme">Red bands</span> = what actually happened was Extreme.
             </>
-          ) : (
-            'Not enough finished windows in this range yet.'
-          )}{' '}
-          <span className="text-ink-faint">The last {horizon} min (shaded) have no actual yet.</span>
+          )}
         </p>
       </section>
 

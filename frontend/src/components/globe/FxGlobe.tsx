@@ -9,13 +9,14 @@
  *
  * - Lit zones are coloured by their volatility level vs the "From" currency (Calm / Unsettled / Storm);
  *   the "From" currency's own zone is the accent colour; zones with no usable data are slate.
+ * - "Extreme" zones (forecast ≥ 1.5× normal) are bright red with pulsing warning rings.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Globe, { type GlobeMethods } from 'react-globe.gl'
 import { SINGAPORE_MARKER, ZONES, ZONE_BY_COUNTRY, type CurrencyZone } from '../../data/currencies'
 import { countryCode, escapeHtml, type CountryFeature } from '../../lib/geo'
 import { usePrefersReducedMotion, useWindowSize } from '../../lib/hooks'
-import { costBand, costRatioPct, LEVEL_INFO } from '../../lib/storm'
+import { costBand, costRatioPct, LEVEL_INFO, volRatio } from '../../lib/storm'
 import { cssVar, withAlpha } from '../../lib/theme'
 import { findPair, zoneLevel, type ZoneLevel } from '../../lib/zones'
 import type { Snapshot } from '../../types'
@@ -44,6 +45,8 @@ function tooltipHtml(
     const info = LEVEL_INFO[level]
     lines.push(`${zone.code} · ${info.name} · ${info.volatility.toLowerCase()} (next 30 min)`)
     const pair = findPair(snapshot, from, zone.code)
+    const ratio = volRatio(pair)
+    if (level === 'extreme' && ratio) lines.push(`⚠ Expected move ≈ ${ratio.toFixed(1)}× its normal size`)
     const band = pair ? costBand(costRatioPct(pair)) : null
     if (band) lines.push(band.label)
   }
@@ -86,6 +89,7 @@ export default function FxGlobe() {
       calm: cssVar('--color-calm', '#2dd4bf'),
       unsettled: cssVar('--color-unsettled', '#fbbf24'),
       storm: cssVar('--color-storm', '#f43f8e'),
+      extreme: cssVar('--color-extreme', '#ff2e3b'),
     }),
     [],
   )
@@ -132,6 +136,13 @@ export default function FxGlobe() {
   }, [])
 
   const singaporeData = useMemo(() => [SINGAPORE_MARKER], [])
+
+  // Pulsing warning rings on every "Extreme" zone (none when "reduce motion" is on)
+  const extremeRings = useMemo(
+    () => (reducedMotion ? [] : ZONES.filter((z) => zoneLevels.get(z.code) === 'extreme').map((z) => z.anchor)),
+    [zoneLevels, reducedMotion],
+  )
+  const ringColor = useCallback(() => (t: number) => withAlpha(colors.extreme, Math.max(0, 1 - t)), [colors])
 
   // 2. Spin + pause-on-drag, set up once the globe exists
   useEffect(() => {
@@ -314,6 +325,15 @@ export default function FxGlobe() {
         pointLabel={(obj: object) => tooltipFor((obj as SingaporeMarker).name, 'SGP')}
         onPointClick={handlePointClick}
         onPointHover={handlePointHover}
+        // Extreme-volatility warning rings
+        ringsData={extremeRings}
+        ringLat="lat"
+        ringLng="lng"
+        ringColor={ringColor}
+        ringMaxRadius={7}
+        ringPropagationSpeed={3}
+        ringRepeatPeriod={700}
+        ringAltitude={0.02}
         // Clicking empty globe clears the selection
         onGlobeClick={clearSelection}
       />

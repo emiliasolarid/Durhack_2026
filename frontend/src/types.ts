@@ -33,6 +33,11 @@ export interface PairSnapshot {
   forecast: PairForecast
   /** How unusual forecast vol is vs this pair's own history, 0–1. Drives globe colour. */
   percentile: number
+  /**
+   * (v3, optional) This pair's NORMAL 30-min vol in bp: the median over recent history.
+   * Forecast ≥ 1.5 × this → "Extreme" (bright red warning). Without it, no Extreme flag.
+   */
+  volNormal30m?: number
   status: PairStatus // (v2)
 }
 
@@ -71,6 +76,6 @@ export interface PairHistory {
 }
 
 /** UI-side derived types */
-export type StormLevel = 'calm' | 'unsettled' | 'storm' | 'nodata'
+export type StormLevel = 'calm' | 'unsettled' | 'storm' | 'extreme' | 'nodata' // 'extreme' added in v3
 export type Tolerance = 'relaxed' | 'balanced' | 'cautious'
 export type ViewMode = 'simple' | 'pro'

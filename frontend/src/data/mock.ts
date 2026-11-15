@@ -99,6 +99,8 @@ function pairAt(spec: PairSpec, t: Date): PairSnapshot {
       spreadBps: HORIZONS_MIN.map((_, i) => Number((spreadBps * (1 + 0.03 * i)).toFixed(3))),
     },
     percentile: Number(percentile.toFixed(3)),
+    // "Normal" = the vol at a median day (percentile 0.5), same formula as above
+    volNormal30m: Number((spec.volPerMinBps * (0.6 + 0.5 * 1.4) * Math.sqrt(30)).toFixed(3)),
     status: statusFor(spec, t),
   }
 }

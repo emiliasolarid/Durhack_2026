@@ -3,7 +3,7 @@
  * and when a pair is usually busy. Pure functions, no React.
  */
 import type { CurrencyCode, HistoryPoint, PairSnapshot, Snapshot, Tolerance } from '../types'
-import { levelFor, type ForecastLevel } from './storm'
+import { levelFor, RANK, type ForecastLevel } from './storm'
 import { findPair } from './zones'
 
 /**
@@ -16,8 +16,6 @@ export function routePairs(snapshot: Snapshot | null, from: CurrencyCode, to: Cu
   if (direct) return [direct]
   return [findPair(snapshot, from, 'USD'), findPair(snapshot, 'USD', to)].filter((p): p is PairSnapshot => !!p)
 }
-
-const RANK: Record<string, number> = { nodata: -1, calm: 0, unsettled: 1, storm: 2 }
 
 /** The leg with the most volatility (shown first, it drives the route's level) */
 export function worstLeg(pairs: PairSnapshot[], tolerance: Tolerance): PairSnapshot | undefined {
